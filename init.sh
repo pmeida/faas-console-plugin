@@ -178,16 +178,16 @@ stop_plugin() {
 stop_console() {
   local cidfile="$PID_DIR/console.cid"
 
-  if [ ! -f "$cidfile" ]; then
-    return
+  if [ -f "$cidfile" ]; then
+    local cid
+    cid=$(cat "$cidfile")
+    if podman stop "$cid" >/dev/null 2>&1 || docker stop "$cid" >/dev/null 2>&1; then
+      echo "Stopped OpenShift console (container $cid)."
+    fi
+    rm -f "$cidfile"
   fi
 
-  local cid
-  cid=$(cat "$cidfile")
-  if podman stop "$cid" >/dev/null 2>&1; then
-    echo "Stopped OpenShift console (container $cid)."
-  fi
-  rm -f "$cidfile"
+  stop_pid "console.pid" "OpenShift console"
 }
 
 stop_dev() {

@@ -54,21 +54,46 @@ echo "Console Image: $CONSOLE_IMAGE"
 echo "Console URL: http://localhost:${CONSOLE_PORT}"
 echo "Console Platform: $CONSOLE_IMAGE_PLATFORM"
 
-# Prefer podman if installed. Otherwise, fall back to docker.
-if [ -x "$(command -v podman)" ]; then
-    CONTAINER_CMD="podman"
+# Prefer podman if installed. Override with CONTAINER_CMD=docker if needed.
+if [ -z "${CONTAINER_CMD:-}" ]; then
+    if [ -x "$(command -v podman)" ]; then
+        CONTAINER_CMD="podman"
+    else
+        CONTAINER_CMD="docker"
+    fi
+fi
+if [ "$CONTAINER_CMD" = "podman" ]; then
     PLUGIN_HOST="host.containers.internal"
 else
-    CONTAINER_CMD="docker"
     PLUGIN_HOST="host.docker.internal"
 fi
 CONTAINER_NETWORK_OPTS="-p ${CONSOLE_PORT}:9000"
 if [[ "$BRIDGE_K8S_MODE_OFF_CLUSTER_ENDPOINT" == *"crc.testing"* ]]; then
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        HOST_GW=$(podman machine ssh "ip route show default" 2>/dev/null | awk '{print $3}')
-        if [ -n "$HOST_GW" ]; then
-            CONTAINER_NETWORK_OPTS="${CONTAINER_NETWORK_OPTS} --add-host api.crc.testing:${HOST_GW}"
+    if [[ "$CONTAINER_CMD" == "podman" ]] && [[ "$(uname -s)" == "Darwin" ]]; then
+        # CRC binds its API to 127.0.0.1 only. Podman containers on macOS
+        # run inside a VM and cannot reach the host's loopback. SSH tunnels
+        # bridge all directions: -R exposes CRC, plugin, and backend inside
+        # the VM; -L makes the console port accessible from the Mac.
+        if [[ "$BRIDGE_K8S_MODE_OFF_CLUSTER_ENDPOINT" =~ :([0-9]+) ]]; then
+            API_PORT="${BASH_REMATCH[1]}"
+        else
+            API_PORT="6443"
         fi
+        podman machine ssh -- \
+            -R "${API_PORT}:127.0.0.1:${API_PORT}" \
+            -R "${PLUGIN_PORT}:127.0.0.1:${PLUGIN_PORT}" \
+            -R "${BACKEND_PORT}:127.0.0.1:${BACKEND_PORT}" \
+            -L "${CONSOLE_PORT}:127.0.0.1:9000" \
+            -N &
+        SSH_PID=$!
+        trap 'pkill -P "$SSH_PID" 2>/dev/null || true; kill "$SSH_PID" 2>/dev/null || true' EXIT
+        sleep 1
+        if ! kill -0 "$SSH_PID" 2>/dev/null; then
+            echo "Error: SSH tunnel to podman VM failed. Is 'podman machine' running?" >&2
+            exit 1
+        fi
+        PLUGIN_HOST="127.0.0.1"
+        CONTAINER_NETWORK_OPTS="--network host --add-host api.crc.testing:127.0.0.1"
     else
         CONTAINER_NETWORK_OPTS="${CONTAINER_NETWORK_OPTS} --add-host api.crc.testing:host-gateway"
     fi
