@@ -1,7 +1,9 @@
 import { K8sResourceKind, WatchK8sResource } from '@openshift-console/dynamic-plugin-sdk';
 import { FUNCTION_NAME_LABEL, REVISION_LABEL } from '../types';
+import { useSyncExternalStore } from 'react';
 
-type Fixtures = {
+// START: useK8sWatchResourceStub ----------------------------------------------
+type WatchFixtures = {
   knSvcs: K8sResourceKind[];
   deps: K8sResourceKind[];
   secrets?: K8sResourceKind[];
@@ -16,7 +18,7 @@ type Fixtures = {
   cmError?: Error;
 };
 
-const fixtures: Fixtures = {
+const watchFixtures: WatchFixtures = {
   knSvcs: [],
   deps: [],
   knLoaded: true,
@@ -25,22 +27,22 @@ const fixtures: Fixtures = {
   cmLoaded: true,
 };
 
-export function setFixtures(opts: Partial<Fixtures>) {
-  fixtures.knSvcs = opts.knSvcs ?? [];
-  fixtures.deps = opts.deps ?? [];
-  fixtures.secrets = opts.secrets ?? [];
-  fixtures.configMaps = opts.configMaps ?? [];
-  fixtures.knLoaded = opts.knLoaded ?? true;
-  fixtures.depLoaded = opts.depLoaded ?? true;
-  fixtures.secretLoaded = opts.secretLoaded ?? true;
-  fixtures.cmLoaded = opts.cmLoaded ?? true;
-  fixtures.knError = opts.knError;
-  fixtures.depError = opts.depError;
-  fixtures.secretError = opts.secretError;
-  fixtures.cmError = opts.cmError;
+export function setWatchFixtures(opts: Partial<WatchFixtures>) {
+  watchFixtures.knSvcs = opts.knSvcs ?? [];
+  watchFixtures.deps = opts.deps ?? [];
+  watchFixtures.secrets = opts.secrets ?? [];
+  watchFixtures.configMaps = opts.configMaps ?? [];
+  watchFixtures.knLoaded = opts.knLoaded ?? true;
+  watchFixtures.depLoaded = opts.depLoaded ?? true;
+  watchFixtures.secretLoaded = opts.secretLoaded ?? true;
+  watchFixtures.cmLoaded = opts.cmLoaded ?? true;
+  watchFixtures.knError = opts.knError;
+  watchFixtures.depError = opts.depError;
+  watchFixtures.secretError = opts.secretError;
+  watchFixtures.cmError = opts.cmError;
 }
 
-export function funcFixture(name: string): Partial<Fixtures> {
+export function funcFixture(name: string): Partial<WatchFixtures> {
   return {
     knSvcs: [ksvcFixture(name, 'True')],
     deps: [deploymentFixture(name, 1, 1)],
@@ -50,7 +52,8 @@ export function funcFixture(name: string): Partial<Fixtures> {
 export function ksvcFixture(
   name: string,
   readyStatus: string,
-  url = `https://${name}-demo.apps.example.com`,
+  namespace = 'demo',
+  url = `https://${name}-${namespace}.apps.example.com`,
   revision = `${name}-00001`,
 ): K8sResourceKind {
   return {
@@ -58,7 +61,7 @@ export function ksvcFixture(
     kind: 'Service',
     metadata: {
       name,
-      namespace: 'demo',
+      namespace,
       labels: { [FUNCTION_NAME_LABEL]: name },
     },
     status: {
@@ -73,6 +76,7 @@ export function deploymentFixture(
   name: string,
   specReplicas: number,
   readyReplicas: number,
+  namespace = 'demo',
   revision = `${name}-00001`,
 ): K8sResourceKind {
   return {
@@ -80,7 +84,7 @@ export function deploymentFixture(
     kind: 'Deployment',
     metadata: {
       name: `${revision}-deployment`,
-      namespace: 'demo',
+      namespace,
       labels: {
         [FUNCTION_NAME_LABEL]: name,
         [REVISION_LABEL]: revision,
@@ -136,16 +140,24 @@ export const useK8sWatchResourceStub = (config: WatchK8sResource) => {
   const { group, kind } = config.groupVersionKind ?? {};
 
   if (group === 'serving.knative.dev' && kind === 'Service')
-    return [filterBySelector(fixtures.knSvcs, config), fixtures.knLoaded, fixtures.knError];
+    return [
+      filterBySelector(watchFixtures.knSvcs, config),
+      watchFixtures.knLoaded,
+      watchFixtures.knError,
+    ];
 
   if (group === 'apps' && kind === 'Deployment')
-    return [filterBySelector(fixtures.deps, config), fixtures.depLoaded, fixtures.depError];
+    return [
+      filterBySelector(watchFixtures.deps, config),
+      watchFixtures.depLoaded,
+      watchFixtures.depError,
+    ];
 
   if (!group && kind === 'Secret')
-    return [fixtures.secrets, fixtures.secretLoaded, fixtures.secretError];
+    return [watchFixtures.secrets, watchFixtures.secretLoaded, watchFixtures.secretError];
 
   if (!group && kind === 'ConfigMap')
-    return [fixtures.configMaps, fixtures.cmLoaded, fixtures.cmError];
+    return [watchFixtures.configMaps, watchFixtures.cmLoaded, watchFixtures.cmError];
 
   return [[], true, null];
 
@@ -156,9 +168,45 @@ export const useK8sWatchResourceStub = (config: WatchK8sResource) => {
 
     if (!expr) return items;
 
-    return items.filter((item) => {
+    const filteredItems = items.filter((item) => {
       const name = item.metadata?.labels?.[FUNCTION_NAME_LABEL];
       return name != null && expr.values?.includes(name);
     });
+
+    // if namespace is provided it's filtering by it
+    if (config?.namespace !== undefined)
+      return filteredItems.filter((item) => item.metadata?.namespace === config?.namespace);
+
+    return filteredItems;
   }
 };
+// END: useK8sWatchResourceStub ------------------------------------------------
+
+// START: useActiveNamespaceStub -----------------------------------------------
+let namespaceFixture = 'demo';
+const listeners = new Set<() => void>();
+
+// Reactive stub for the SDK's useActiveNamespace hook. Uses
+// useSyncExternalStore so that calling setActiveNamespace in a test
+// triggers a React re-render, matching real console behavior.
+export const useActiveNamespaceStub = () => {
+  const result = useSyncExternalStore(
+    (callback) => {
+      listeners.add(callback);
+      return () => listeners.delete(callback);
+    },
+    () => namespaceFixture,
+  );
+  return [result, setActiveNamespace];
+};
+
+// Update the active namespace and notify React. Wrap in act() in tests.
+export function setActiveNamespace(ns: string) {
+  namespaceFixture = ns;
+  listeners.forEach((listener) => listener());
+}
+// END: useActiveNamespaceStub -------------------------------------------------
+
+// START: isAllNamespaceKeyFake ------------------------------------------------
+export const isAllNamespaceKeyFake = (ns: string) => ns === '#ALL_NS#';
+// END: isAllNamespaceKeyFake --------------------------------------------------
