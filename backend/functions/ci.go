@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"knative.dev/func/pkg/builders"
 	cigithub "knative.dev/func/pkg/ci/github"
 	fn "knative.dev/func/pkg/functions"
 
@@ -28,6 +29,7 @@ func generateGithubCIFiles(dir string, cfg ScaffoldConfig) error {
 			Branch:        cfg.Branch,
 			RegistryLogin: !cfg.InternalRegistry,
 			TestStep:      cigithub.DefaultTestStep,
+			Builder:       builders.S2I,
 		}),
 		cigithub.WithMessageWriter(io.Discard),
 	)
