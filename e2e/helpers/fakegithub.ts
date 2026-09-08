@@ -59,6 +59,35 @@ export async function resetFakeGithub(): Promise<void> {
   }
 }
 
+interface WorkflowRunResult {
+  conclusion: string;
+  logUrl: string;
+}
+
+export async function waitForWorkflowRun(
+  owner: string,
+  repo: string,
+  { timeout = 600_000, interval = 5_000 }: { timeout?: number; interval?: number } = {},
+): Promise<WorkflowRunResult> {
+  const url = `${fakeGithubUrl()}/repos/${owner}/${repo}/actions/runs`;
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const data = await fetch(url, {
+      headers: { Authorization: `token ${FAKE_GH_PAT}` },
+    }).then((r) => r.json());
+    const run = data.workflow_runs?.[0];
+    if (run?.status === 'completed') {
+      // html_url is built from r.Host in the fake server, which is the in-cluster
+      // hostname when called by the backend. Rewrite it through the port-forward URL
+      // so the test runner can actually reach it.
+      const logPath = new URL(run.html_url as string).pathname;
+      return { conclusion: run.conclusion as string, logUrl: `${fakeGithubUrl()}${logPath}` };
+    }
+    await new Promise((r) => setTimeout(r, interval));
+  }
+  throw new Error(`Workflow run for ${owner}/${repo} did not complete within ${timeout}ms`);
+}
+
 export async function deleteRepoOnFakeGithub(owner: string, name: string): Promise<void> {
   const url = fakeGithubUrl();
   const resp = await fetch(`${url}/repos/${owner}/${name}`, {

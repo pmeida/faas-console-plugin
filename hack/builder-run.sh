@@ -8,13 +8,14 @@ set -euo pipefail
 #   ./hack/builder-run.sh make lint
 #   ./hack/builder-run.sh make unit
 #
-# E2E (requires KUBECONFIG, PLUGIN_PULL_SPEC, and BRIDGE_KUBEADMIN_PASSWORD).
+# E2E (requires KUBECONFIG, PLUGIN_PULL_SPEC, FAKEGITHUB_PULL_SPEC, and BRIDGE_KUBEADMIN_PASSWORD).
 # Tests that deploy Knative services need the Serverless Operator installed
 # on the cluster beforehand. Run "make setup-serverless" once before the
 # first e2e run (it is idempotent).
-#
+# 
 #   KUBECONFIG=<kubeconfig PATH> \
-#   PLUGIN_PULL_SPEC=<a publicly accessible/accessible in the cluster image tag> \
+#   PLUGIN_PULL_SPEC=<plugin image> \
+#   FAKEGITHUB_PULL_SPEC=$(make push-fakegithub | tail -1) \
 #   BRIDGE_KUBEADMIN_PASSWORD=<password> \
 #     ./hack/builder-run.sh make e2e
 #
@@ -33,9 +34,11 @@ log::info "Done"
 
 ENTRYPOINT=$(cat <<'SCRIPT'
 # In presubmits, oc is injected by ci-operator (cli: latest). Locally we download it.
-OC_ARCH=$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')
-curl -fsSL "https://mirror.openshift.com/pub/openshift-v4/${OC_ARCH}/clients/ocp/stable/openshift-client-linux.tar.gz" | tar xz -C /tmp oc
-export PATH=/tmp:$PATH
+if ! command -v oc &>/dev/null; then
+  OC_ARCH=$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')
+  curl -fsSL "https://mirror.openshift.com/pub/openshift-v4/${OC_ARCH}/clients/ocp/stable/openshift-client-linux.tar.gz" | tar xz -C /tmp oc
+  export PATH=/tmp:$PATH
+fi
 
 if [ -n "${BRIDGE_KUBEADMIN_PASSWORD:-}" ]; then
   echo -n "$BRIDGE_KUBEADMIN_PASSWORD" > /tmp/kubeadmin-password
@@ -63,7 +66,7 @@ if [ -n "${KUBECONFIG:-}" ]; then
   ENV_STR+=("-e" "KUBECONFIG=/kube/config")
 fi
 
-for VAR in PLUGIN_PULL_SPEC BRIDGE_KUBEADMIN_PASSWORD; do
+for VAR in PLUGIN_PULL_SPEC FAKEGITHUB_PULL_SPEC BRIDGE_KUBEADMIN_PASSWORD; do
   if [ -n "${!VAR:-}" ]; then
     ENV_STR+=("-e" "$VAR")
   fi
