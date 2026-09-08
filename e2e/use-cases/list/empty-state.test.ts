@@ -1,5 +1,5 @@
 import { test, expect } from '../../fixtures/authenticated-page';
-import { navigateToFunctionsList } from '../../helpers/navigation';
+import { navigateToFunctionsList, selectNamespace } from '../../helpers/navigation';
 import { resetFakeGithub, seedRepo } from '../../helpers/fakegithub';
 import { E2E_USER, PRESEEDED_FUNC_NAME, PRESEEDED_FUNC_NAMESPACE } from '../../helpers/constants';
 import { deleteFunction } from '../../helpers/cluster';
@@ -32,8 +32,11 @@ test.describe('Functions list empty state', () => {
   });
 
   test('shows empty state when no functions exist', async ({ page }) => {
-    await test.step('navigate to functions list', async () => {
+    await test.step('navigate to functions list scoped to the test namespace', async () => {
       await navigateToFunctionsList(page);
+      // Scope to PRESEEDED_FUNC_NAMESPACE so that functions left by other tests
+      // or users in their own namespaces do not pollute the view.
+      await selectNamespace(page, PRESEEDED_FUNC_NAMESPACE);
     });
 
     await test.step('verify empty state', async () => {
