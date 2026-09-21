@@ -74,14 +74,7 @@ export interface CreateFunctionRequest {
 }
 
 export type FunctionStatus =
-  | 'Building'
-  | 'Deploying'
-  | 'Running'
-  | 'ScaledToZero'
-  | 'Error'
-  | 'BuildFailed'
-  | 'Unknown'
-  | 'NotDeployed';
+  'Deploying' | 'Running' | 'ScaledToZero' | 'Error' | 'BuildFailed' | 'Unknown' | 'NotDeployed';
 
 export interface ClusterFunction {
   readonly name: string;

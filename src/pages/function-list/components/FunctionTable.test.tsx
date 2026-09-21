@@ -12,7 +12,6 @@ const mockUseDeleteModal = vi.fn().mockReturnValue(vi.fn());
 
 vi.mock('@openshift-console/dynamic-plugin-sdk', () => ({
   SuccessStatus: ({ title }: { title: string }) => `Success: ${title}`,
-  ProgressStatus: ({ title }: { title: string }) => `Progress: ${title}`,
   ErrorStatus: ({ title }: { title: string }) => `Error: ${title}`,
   InfoStatus: ({ title }: { title: string }) => `Info: ${title}`,
   StatusIconAndText: ({ title }: { title: string }) => `Warning: ${title}`,
@@ -22,6 +21,7 @@ vi.mock('@openshift-console/dynamic-plugin-sdk', () => ({
 vi.mock('@patternfly/react-icons', () => ({
   ExclamationTriangleIcon: () => 'WarningIcon',
   PencilAltIcon: () => 'EditIcon',
+  RhUiSyncIcon: () => 'SyncIcon',
   TrashIcon: () => 'DeleteIcon',
 }));
 
@@ -250,7 +250,7 @@ describe('FunctionTable', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('Progress: Deploying')).toBeInTheDocument();
+    expect(screen.getByText('Info: Deploying')).toBeInTheDocument();
     expect(screen.getByLabelText('Build in progress')).toBeInTheDocument();
   });
 
@@ -283,6 +283,23 @@ describe('FunctionTable', () => {
     );
 
     expect(screen.getByText('Info: NotDeployed')).toBeInTheDocument();
+  });
+
+  it('keeps NotDeployed and shows a build-in-progress indicator when buildActivity is Building', () => {
+    const firstTimeBuild: FunctionTableItem = {
+      ...mockFunctions[1],
+      status: 'NotDeployed',
+      buildActivity: 'Building',
+    };
+
+    render(
+      <MemoryRouter>
+        <FunctionTable functions={[firstTimeBuild]} onEdit={vi.fn()} showNamespace />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('Info: NotDeployed')).toBeInTheDocument();
+    expect(screen.getByLabelText('Build in progress')).toBeInTheDocument();
   });
 
   it('displays hostname-only link for URL', () => {

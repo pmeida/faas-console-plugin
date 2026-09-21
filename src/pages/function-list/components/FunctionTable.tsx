@@ -2,21 +2,17 @@ import {
   ErrorStatus,
   InfoStatus,
   K8sResourceCommon,
-  ProgressStatus,
   StatusIconAndText,
   SuccessStatus,
   useDeleteModal,
 } from '@openshift-console/dynamic-plugin-sdk';
+import { ActionList, ActionListItem, Button, Flex, Icon, Tooltip } from '@patternfly/react-core';
 import {
-  ActionList,
-  ActionListItem,
-  Button,
-  Flex,
-  Icon,
-  Spinner,
-  Tooltip,
-} from '@patternfly/react-core';
-import { ExclamationTriangleIcon, PencilAltIcon, TrashIcon } from '@patternfly/react-icons';
+  ExclamationTriangleIcon,
+  PencilAltIcon,
+  RhUiSyncIcon,
+  TrashIcon,
+} from '@patternfly/react-icons';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import { useTranslation } from 'react-i18next';
 import { FunctionSource, FunctionStatus } from '../../../common/types';
@@ -125,17 +121,15 @@ function StatusCell({
     case 'ScaledToZero':
       return withBuildActivity(<InfoStatus title={status} />, buildActivity, buildRunURL);
     case 'Deploying':
-      return withBuildActivity(<ProgressStatus title={status} />, buildActivity, buildRunURL);
+      return withBuildActivity(<InfoStatus title={status} />, buildActivity, buildRunURL);
     case 'Error':
       return withBuildActivity(<ErrorStatus title={status} />, buildActivity, buildRunURL);
-    case 'Building':
-      return <ProgressStatus title={status} />;
     case 'BuildFailed': {
       const badge = <ErrorStatus title={status} className="pf-v6-u-display-inline-flex" />;
       return buildRunURL ? <RunLink url={buildRunURL}>{badge}</RunLink> : badge;
     }
     case 'NotDeployed':
-      return <InfoStatus title={status} />;
+      return withBuildActivity(<InfoStatus title={status} />, buildActivity, buildRunURL);
     case 'Unknown':
       return <StatusIconAndText title={status} icon={<ExclamationTriangleIcon />} />;
   }
@@ -183,9 +177,9 @@ function BuildActivityIndicator({
   if (buildActivity === 'Building') {
     return (
       <Tooltip content={t('Build in progress')}>
-        <span className="pf-v6-u-display-inline-flex">
-          <Spinner size="sm" aria-label={t('Build in progress')} />
-        </span>
+        <Icon role="img" aria-label={t('Build in progress')}>
+          <RhUiSyncIcon className="co-spin" />
+        </Icon>
       </Tooltip>
     );
   }

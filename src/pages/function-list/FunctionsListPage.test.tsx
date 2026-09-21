@@ -369,7 +369,7 @@ describe('FunctionsListPage', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText('Progress: Deploying')).toBeInTheDocument();
+    expect(await screen.findByText('Info: Deploying')).toBeInTheDocument();
   });
 
   it('shows Error status from ClusterFunction', async () => {
@@ -388,9 +388,9 @@ describe('FunctionsListPage', () => {
     expect(await screen.findByText('Error: Error')).toBeInTheDocument();
   });
 
-  it('shows Building as the primary status when the function is not running', async () => {
-    // No cluster fixture, so the function is NotDeployed: the build status is the
-    // most useful thing to show, so Building becomes the primary status.
+  it('shows NotDeployed with a build-in-progress indicator when the function is not yet deployed', async () => {
+    // No cluster fixture, so the function is NotDeployed. Building is always shown
+    // as a secondary indicator regardless of whether there is an existing deployment.
     listFunctionsStub({ responses: [repoListItem(funcName)] });
     setWatchResponse([
       buildStatusFrame({ [`twoGiants/${funcName}`]: { buildStatus: 'Building' } }),
@@ -402,7 +402,9 @@ describe('FunctionsListPage', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText('Progress: Building')).toBeInTheDocument();
+    expect(await screen.findByText('Info: NotDeployed')).toBeInTheDocument();
+    expect(screen.getByLabelText('Build in progress')).toBeInTheDocument();
+    expect(screen.queryByText('Progress: Building')).not.toBeInTheDocument();
   });
 
   it('keeps Running with a build-in-progress indicator when the cluster is Running', async () => {
@@ -499,7 +501,7 @@ describe('FunctionsListPage', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText('Progress: Deploying')).toBeInTheDocument();
+    expect(await screen.findByText('Info: Deploying')).toBeInTheDocument();
     expect(screen.getByLabelText('Build in progress')).toBeInTheDocument();
     expect(screen.queryByText('Progress: Building')).not.toBeInTheDocument();
   });

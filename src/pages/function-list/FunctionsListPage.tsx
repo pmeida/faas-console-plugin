@@ -281,9 +281,9 @@ function enrichItem(item: FunctionTableItem, cf: ClusterFunction): FunctionTable
   };
 }
 
-// mergeBuild overlays build status onto a function: one the cluster knows about
-// keeps its cluster status with the build shown only as a secondary indicator,
-// otherwise the build status becomes the primary status.
+// mergeBuild overlays build status onto a function: whether or not the cluster
+// knows about the function, a build in progress is always shown as a secondary
+// indicator alongside the primary status.
 //
 // The gate is cluster presence (inCluster), not the status value. A live
 // function reports Deploying for a moment while a new revision rolls out, and
@@ -306,9 +306,9 @@ function mergeBuild(
     // Succeeded / None: nothing to overlay on a cluster-known function.
     return item;
   }
-  // Not in the cluster at all: show only the build status.
+  // Not in the cluster at all: surface building as a secondary indicator alongside NotDeployed.
   if (build.buildStatus === 'Building') {
-    return { ...item, status: 'Building' };
+    return { ...item, buildActivity: 'Building' };
   }
   if (build.buildStatus === 'Failed') {
     return { ...item, status: 'BuildFailed', buildRunURL: build.runURL };
