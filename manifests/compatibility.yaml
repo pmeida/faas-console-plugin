@@ -1,0 +1,5 @@
+# Contract between the plugin image and the functions-operator.
+# The operator refuses to apply manifests with a formatVersion it does not
+# understand, so an image from the future fails cleanly instead of
+# half-applying.
+formatVersion: "1"

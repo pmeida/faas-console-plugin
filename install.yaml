@@ -60,3 +60,10 @@ spec:
   name: serverless-functions
   source: serverless-functions-catalog
   sourceNamespace: openshift-marketplace
+  # To deploy a specific plugin image (e.g. a CI build from a PR), inject it
+  # through the operator's env. The operator deploys this image and renders
+  # the resource definitions it carries under /manifests:
+  # config:
+  #   env:
+  #   - name: CONSOLE_PLUGIN_IMAGE
+  #     value: quay.io/redhat-user-workloads/ocp-serverless-tenant/faas-console-plugin:latest

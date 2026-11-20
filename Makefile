@@ -130,13 +130,15 @@ image: ## Build container image
 
 ##@ Cluster
 
-deploy: ## Deploy plugin to cluster (defaults to quay.io latest image)
+deploy: ## Deploy plugin via the functions-operator (OLM); IMAGE optional (CSV default)
 	hack/deploy.sh
 
-undeploy: ## Remove plugin from cluster
-	helm uninstall $(PLUGIN_NAME) -n $(NAMESPACE)
+undeploy: ## Remove plugin and functions-operator from cluster (OLM)
+	oc delete consoleplugin/$(PLUGIN_NAME) 2>/dev/null || true; \
+	oc delete subscription/serverless-functions -n openshift-operators 2>/dev/null || true; \
+	oc delete catalogsource/serverless-functions-catalog -n openshift-marketplace 2>/dev/null || true
 
-deploy-dev: ## Build and deploy to cluster (dev)
+deploy-dev: ## Build plugin image and deploy via the operator (OLM, dev)
 	hack/deploy-dev.sh
 
 setup-serverless: ## Install Serverless operator and Knative Serving

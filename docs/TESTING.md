@@ -489,14 +489,14 @@ E2E tests also run in CI via Prow/ci-operator against an ephemeral OCP cluster o
 1. ci-operator provisions an ephemeral cluster from the `openshift-org-aws` pool
 2. The `install-operators` pre-step installs the Serverless operator from `redhat-operators`
 3. ci-operator builds the plugin container image from the Dockerfile
-4. `hack/test-prow-e2e.sh` deploys the plugin to the cluster via Helm, enables it on the console, then runs Playwright headless
+4. `hack/test-prow-e2e.sh` deploys the plugin to the cluster through the functions-operator (OLM install with the plugin image injected via the Subscription), enables it on the console, then runs Playwright headless
 5. Artifacts (JUnit XML, HTML report, screenshots, traces) are copied to `$ARTIFACT_DIR` for Prow Spyglass
 
 ### Configuration
 
 | File | Purpose |
 |------|---------|
-| `Dockerfile.buildroot` | Builder image (Go 1.26 + Node 24 + Yarn 4 + Helm for the `src` container) |
+| `Dockerfile.buildroot` | Builder image (Go 1.26 + Node 24 + Yarn 4 + ko for the `src` container) |
 | `hack/test-prow-e2e.sh` | Prow e2e test entrypoint (reads cluster credentials, deploys plugin, runs tests) |
 
 The ci-operator job config lives in the `openshift/release` repo at `ci-operator/config/openshift/faas-console-plugin/`.

@@ -11,10 +11,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/log.sh"
+source "${SCRIPT_DIR}/lib/registry.sh"
 
 NAMESPACE="${NAMESPACE:-console-functions-plugin}"
-REGISTRY_PORT=5001
-INTERNAL_REGISTRY="image-registry.openshift-image-registry.svc:5000"
 
 # --- Prerequisites ---
 
@@ -33,44 +32,21 @@ if ! command -v ko &>/dev/null; then
   exit 1
 fi
 
-# --- Detect cluster architectures ---
-
-ARCHES=$(oc get nodes -o jsonpath='{range .items[*]}{.status.nodeInfo.architecture}{"\n"}{end}' 2>/dev/null | sort -u || true)
-if [[ -z "$ARCHES" ]]; then
-  KO_PLATFORM="linux/amd64"
-  log::warn "Could not detect cluster node architectures, falling back to ${KO_PLATFORM}"
-else
-  KO_PLATFORM=$(echo "$ARCHES" | sed 's/^/linux\//' | paste -sd,)
-  log::info "Cluster architectures detected: ${KO_PLATFORM}"
-fi
-
 # --- Ensure namespace exists ---
 
 oc get namespace "$NAMESPACE" &>/dev/null 2>&1 || oc create namespace "$NAMESPACE"
 
-# --- Port-forward the internal registry ---
+# --- Build and push with ko ---
 
 log::step "Pushing fake GitHub image to internal registry"
 
-log::info "Port-forwarding registry to localhost:${REGISTRY_PORT}..."
-oc port-forward svc/image-registry \
-  "${REGISTRY_PORT}:5000" \
-  -n openshift-image-registry &
-PF_PID=$!
-trap "kill $PF_PID 2>/dev/null || true" EXIT INT TERM
-sleep 5
+registry::port_forward
+trap registry::stop_port_forward EXIT INT TERM
 
-# --- Build and push with ko ---
-
-log::info "Logging in to registry..."
-ko login "localhost:${REGISTRY_PORT}" \
-  -u unused -p "$(oc create token builder -n "$NAMESPACE")"
-
-export KO_DOCKER_REPO="localhost:${REGISTRY_PORT}/${NAMESPACE}/fakegithub"
-export KO_DEFAULTBASEIMAGE="registry.access.redhat.com/ubi9/ubi-micro:latest"
+registry::ko_setup "$NAMESPACE" "fakegithub"
+KO_PLATFORM=$(registry::cluster_platforms)
 
 log::info "Building and pushing with ko..."
-export GOFLAGS="${GOFLAGS:-} -buildvcs=false"
 KO_IMAGE=$(cd "${SCRIPT_DIR}/../backend" && ko build --bare --insecure-registry --platform="${KO_PLATFORM}" ./cmd/fakegithub)
 
 log::info "ko produced: ${KO_IMAGE}"
@@ -80,7 +56,7 @@ DIGEST="${KO_IMAGE#*@}"
 DEPLOY_IMAGE="${INTERNAL_REGISTRY}/${NAMESPACE}/fakegithub@${DIGEST}"
 
 # Kill port-forward, no longer needed
-kill $PF_PID 2>/dev/null || true
+registry::stop_port_forward
 trap - EXIT
 
 # --- Deploy ---

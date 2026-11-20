@@ -1,13 +1,15 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ template "openshift-console-plugin.credentialName" . }}
-  namespace: {{ .Release.Namespace }}
+  name: {{ .Name }}
+  namespace: {{ .Namespace }}
   labels:
-    {{- include "openshift-console-plugin.labels" . | nindent 4 }}
+    app: {{ .Name }}
+    app.kubernetes.io/name: {{ .Name }}
+    app.kubernetes.io/part-of: {{ .Name }}
+    app.kubernetes.io/managed-by: func-operator
 rules:
-  # The backend keeps SCM credentials in Secrets rather than in the browser.
-  # Namespaced on purpose: they never leave the plugin's own namespace.
+  # The plugin keeps SCM credentials in Secrets in its own namespace.
   # A user owns one Secret, named after their identity, so reconnecting
   # overwrites it instead of adding another: hence update alongside create.
   - apiGroups: [""]

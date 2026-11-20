@@ -31,6 +31,10 @@ RUN if [ -f /cachi2/cachi2.env ]; then . /cachi2/cachi2.env; fi && \
 FROM registry.access.redhat.com/ubi9-micro:latest@sha256:dbd325b96bcd432dd42816d31412bdf1dc0fb973b79ed310344bc23c76c068db
 COPY --from=gobuilder /opt/app-root/src/bin/plugin-backend /usr/bin/plugin-backend
 COPY --from=gobuilder /etc/pki/tls/certs/ca-bundle.crt /etc/pki/tls/certs/ca-bundle.crt
+# Plugin resource definitions consumed by the functions-operator (SRVOCF-1095).
+# The image is treated as data by the operator: it is pulled and read, never
+# executed, to extract these.
+COPY manifests /manifests
 USER 1001
 
 LABEL name="openshift-serverless-tech-preview/functions-console-plugin-rhel9" \

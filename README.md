@@ -99,7 +99,6 @@ oc patch consoles.operator.openshift.io cluster --type=json \
 - [Node.js](https://nodejs.org/en/) (v24+)
 - [Yarn](https://yarnpkg.com) (v4)
 - [Go](https://go.dev/dl/) (v1.26+)
-- [Helm](https://helm.sh/docs/intro/install/)
 - [oc](https://console.redhat.com/openshift/downloads) CLI
 - [Podman](https://podman.io) (v3.2.0+)
 - An [OpenShift cluster](https://console.redhat.com/openshift/create)

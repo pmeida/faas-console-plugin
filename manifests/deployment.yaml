@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Name }}
+  namespace: {{ .Namespace }}
+  labels:
+    app: {{ .Name }}
+    app.kubernetes.io/name: {{ .Name }}
+    app.kubernetes.io/part-of: {{ .Name }}
+    app.kubernetes.io/managed-by: func-operator
+    app.openshift.io/runtime-namespace: {{ .Namespace }}
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 25%
+  selector:
+    matchLabels:
+      app: {{ .Name }}
+      app.kubernetes.io/name: {{ .Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Name }}
+        app.kubernetes.io/name: {{ .Name }}
+        app.kubernetes.io/part-of: {{ .Name }}
+        app.kubernetes.io/managed-by: func-operator
+    spec:
+      serviceAccountName: {{ .Name }}
+      restartPolicy: Always
+      dnsPolicy: ClusterFirst
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: {{ .Name }}
+          image: {{ .Image }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--https-port=9443"
+            - "--external-api-server-url={{ .APIServerURL }}"
+            - "--cluster-id={{ .ClusterID }}"
+            {{- if or .Config.ghApiUrl .Env.GH_API_URL }}
+            - "--gh-api-url={{ or .Config.ghApiUrl .Env.GH_API_URL }}"
+            {{- end }}
+            {{- if .Config.workflowPollingInterval }}
+            - "--workflow-polling-interval={{ .Config.workflowPollingInterval }}"
+            {{- end }}
+          ports:
+            - containerPort: 9443
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 9443
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9443
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 10m
+              memory: 50Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: {{ .CertSecret }}
+              readOnly: true
+              mountPath: /var/cert
+      volumes:
+        - name: {{ .CertSecret }}
+          secret:
+            secretName: {{ .CertSecret }}
+            defaultMode: 420
