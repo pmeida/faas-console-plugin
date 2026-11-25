@@ -18,9 +18,9 @@ But the ownership proposition has three hard edges the evidence makes unavoidabl
 
 1. **Maintenance surface is large for "support as-is."** ~105k lines of implementation Go (approx; ~155k physical across 727 files), plus a large ~197k-line test suite, across ~274 packages and 14 binaries, 249 vendored modules, and a ~615-issue / ~371-PR open backlog on a 6-month project, weekly releases, and breaking changes openly expected. The stack is deep systems work: gVisor, Cloud Hypervisor microVMs, an Envoy data plane, nftables/netns networking, a Postgres control-plane datastore, OpenFGA authorization, SPIFFE/pod-certificate identity, and S3/GCS snapshot storage. This is broader and deeper than KEDA.
 
-2. **It does not cleanly run on OpenShift today.** OCP 4.22 is Kubernetes 1.35; OCP 5.0 is 1.36. Substrate's homepage floor is 1.37, and it requires alpha/beta API features (`ClusterTrustBundle`, `PodCertificateRequest`, `certificates.k8s.io/v1beta1`) that are off by default and that OpenShift does not let you toggle individually (and managed ROSA/OSD does not let you toggle at all). Substrate's isolation is gVisor-first; OCP's supported sandbox runtime is Kata.
+2. **It does not cleanly run on OpenShift today, but the hardest blocker is a timing issue, not a permanent one.** OCP 4.22 is Kubernetes 1.35; OCP 5.0 is 1.36. Substrate's homepage floor is 1.37, and on 1.36 it requires features (`ClusterTrustBundle`, `PodCertificateRequest`) that are beta-but-off-by-default and that OpenShift does not let you toggle individually (and managed ROSA/OSD does not let you toggle at all). **However, all the required feature gates graduate to GA and locked-on in Kubernetes 1.37, so the first OCP to ship 1.37 (plausibly OCP 5.1, ~spring 2027) clears the version and gate floor with nothing to toggle. [verified, kubernetes.io feature-gate tables, 2026-11-24]** What remains on any OCP: Substrate runs its sandboxes (gVisor, or Kata on Cloud Hypervisor) *nested inside privileged worker pods*, while OpenShift's supported sandbox is node-level Kata (OpenShift sandboxed containers) - an SCC/integration problem, not a fundamental incompatibility.
 
-3. **It overlaps an existing Red Hat bet.** Red Hat already productizes **`kubernetes-sigs/agent-sandbox`** as the "Red Hat build of Agent Sandbox" (Kata microVMs, tech preview in OCP 5). Owning Google's Substrate (a different, gVisor-based, higher-density runtime for the same problem) is a **second bet in the same layer** unless there is an explicit strategy (Substrate as the density/scheduling tier above Kata isolation, or Substrate superseding Agent Sandbox). That strategy is not stated in the call notes.
+3. **It is a second bet in the same problem space, without a stated composition story.** Red Hat already productizes **`kubernetes-sigs/agent-sandbox`** as the "Red Hat build of Agent Sandbox" (Kata microVMs, tech preview in OCP 5). The two are **not the same layer**: agent-sandbox is a `Sandbox` CRD that delegates isolation to a node-level RuntimeClass (one sandbox = one pod = one VM), while Substrate is a density/runtime tier that multiplexes many actors onto warm workers via nested in-pod sandboxes with snapshot/resume **[verified, both READMEs, 2026-11-24]**. The overlap is real but partial: warm pools (`SandboxWarmPool` vs `WorkerPool`) today, and agent-sandbox's aspirational "deep hibernation" roadmap converging on Substrate's core feature tomorrow - plus the customer-confusion cost of two Red Hat answers to "where do agent workloads run." Owning Substrate fills a layer Red Hat currently does not cover, but only if someone states how the two compose (or which wins). That strategy is not in the call notes.
 
 **Preliminary lean (team's to accept or reject): a qualified "yes, but not an unconditional commitment this week."** The team is a good technical fit (Go, controllers, KEDA upstream experience, Knative/serverless suspend-resume adjacency) and the upside is strategically large. But committing to *sole* ownership by Wednesday is premature until Mike/Finn answer three things: (a) the Agent Sandbox overlap/strategy, (b) guaranteed capacity plus an embedded PM (the "not another PIXAA" condition), and (c) a realistic scope, because "no new features" is not credible alongside "RFEs from the OCP AI team, prioritized over frontend." If those are answered well, a yes is defensible. If they cannot be, we should say so now, exactly as Mike asked.
 
@@ -63,7 +63,15 @@ Kubernetes                nodes, autoscaling, NetworkPolicies
 
 **The Red Hat overlap.** OpenShift 5 GA'd on 2026-11-09 with an agentic story: OpenShift Lightspeed (supervised agentic ops GA; autonomous troubleshooting + update agent in tech preview), an OpenShift MCP server + MCP gateway (GA), confidential containers, and the **"Red Hat build of Agent Sandbox" (tech preview)**, which "uses OpenShift sandboxed containers to place agent workloads inside VMs." **[verified, Red Hat / unite.ai coverage]** The upstream is almost certainly `kubernetes-sigs/agent-sandbox` **[needs confirmation]**.
 
-So Red Hat has already chosen a **Kata-based, SIG-governed** agent isolation story. This proposal asks us to own a **gVisor-based, Google/CNCF, higher-density** runtime for an overlapping problem. The two can be framed as complementary (Agent Sandbox = isolation primitive; Substrate = density/scheduling tier above it) or as competing bets. **Which one Red Hat intends is the single most important open question for Mike** (see Section 9).
+So Red Hat has already chosen a **Kata-based, SIG-governed, node-level** agent isolation story. This proposal asks us to own a **Google/CNCF, higher-density** runtime for an overlapping problem - and notably, Substrate's microVM class is *also* Kata (on the Cloud Hypervisor VMM), just nested inside worker pods rather than installed as the node runtime **[verified, 2026-11-24]**.
+
+**How much do they actually overlap? [verified against both READMEs, 2026-11-24]** Less than "same layer" suggests:
+
+- **Different abstractions.** agent-sandbox's `Sandbox` CRD gives you one long-running, stateful, singleton pod with stable identity and delegates isolation to a node-level RuntimeClass (gVisor or Kata). Substrate multiplexes many actors onto fewer warm workers with snapshot/resume and nested in-pod sandboxes. agent-sandbox has no density, oversubscription, or actor-multiplexing control plane.
+- **Genuine overlap today:** warm pools (`SandboxWarmPool`/`SandboxClaim` vs `WorkerPool`) solve the same allocation-latency problem, and both target untrusted agent code.
+- **Plausible convergence tomorrow:** agent-sandbox lists "deep hibernation" (state-to-persistent-storage) and memory sharing as *desired features, not shipped ones*. If the SIG builds them, the projects collide on Substrate's core ground.
+
+The two can therefore be framed as complementary (Agent Sandbox = node-level isolation primitive; Substrate = density/scheduling tier above it, sharing the Kata/Cloud Hypervisor lineage) or as competing bets; the shared lineage and the layer gap both strengthen the complementary framing - Substrate fills a layer Red Hat currently does not cover. **Whether Red Hat intends them to compose, and who owns that story, is the single most important open question for Mike** (see Section 9).
 
 ---
 
@@ -77,6 +85,62 @@ So Red Hat has already chosen a **Kata-based, SIG-governed** agent isolation sto
 | `kubernetes-sigs/agent-sandbox` | SIG isolation (RH build) | 2025-08-12 | 4,693 | n/a | n/a | n/a | 128 / 70 | n/a |
 
 All Apache-2.0. Issue/PR columns are the true split obtained from the `search` API; GitHub's `open_issues_count` field bundles open PRs into the issue number (e.g. Substrate shows 985 = 615 issues + 371 PRs), which is what my first draft mis-reported. Values drift daily. **[verified via GitHub API today]**
+
+### Backlog composition (open issues by kind) **[verified via GitHub search API, 2026-11-25]**
+
+| Kind | Open | Notes |
+|---|---|---|
+| `kind/feature` | 290 | the largest bucket - RFE demand is real |
+| `kind/bug` | **219** | the number that matters for "support as-is" |
+| `kind/design` | 61 | open design discussions / proto-RFCs |
+| `kind/cleanup` | 51 | the refactoring bucket (there is no `kind/refactor`) |
+| `kind/docs` | 23 | |
+| `kind/performance` | 21 | |
+| **Total open issues** | **628** | 30 are `prio/P0`, 46 `prio/P1` |
+
+Read: a 6-month-old project carrying 219 open bugs and 30 P0s is the single clearest signal of the load "as-is" ownership buys. Even triaging at Google's current pace, the backlog grows.
+
+### Who actually drives the project **[verified from full git history + GitHub API, 2026-11-25]**
+
+**Commits by author email domain** (full history, ~1,720 commits, 164 unique authors):
+
+- `google.com`: 1,111 commits, 55 authors
+- `users.noreply.github.com`: 313 commits, 40 authors
+- `gmail.com`: 163 commits, 49 authors
+- `solo.io`: 50 commits (Eitan Yarmush)
+- `nvidia.com`: 25 commits (Omer Yahud, Davanum Srinivas)
+- `docker.com`: 22 commits
+- ~15 other companies with 1-6 commits each (zendesk, giantswarm, coreweave, ...)
+
+Caveat: the gmail/noreply buckets contain confirmed Googlers (e.g. dberkov, company=Google), so the honest split is **roughly 70-80% of commits from Google**. The recurring non-Google contributors are solo.io, Nvidia, and Docker.
+
+**Who merges PRs** (last 300 merged PRs, 12+ distinct mergers) - the de facto maintainer roster:
+
+| Merger | Merges (of 300) | Affiliation |
+|---|---|---|
+| BenTheElder (Benjamin Elder) | 56 | Google (kind creator) |
+| dberkov | 37 | Google |
+| LiorLieberman | 34 | Google |
+| thockin (Tim Hockin) | 33 | Google (K8s founding engineer) |
+| maxsmythe | 25 | Google |
+| zoez7 | 24 | unconfirmed |
+| EItanya (Eitan Yarmush) | 19 | **solo.io** |
+| juli4n, HavenXia, msau42 | 15/15/13 | Google |
+| sfunkenhauser, bowei | 7/7 | -/Google |
+
+So yes, "they are a big team": **~12 active mergers, at least 10 Google** (including heavyweight K8s names), one significant external maintainer (solo.io). A team of 3-4 of ours merging regularly would be ~25% of merge activity - enough to be heard, not enough to steer alone.
+
+**Development process** **[verified from CONTRIBUTING.md, releasing docs, observed cadence]**:
+
+- GitHub PRs with a merge queue; at least one maintainer approval required (even for maintainers); DCO enforced
+- Behavior changes MUST come with tests; CI on every PR; privileged tests behind `roottest.Require`
+- PR sizing convention (S/M/L/XL; XL must be split)
+- Semver, with a `breaking-change` label and mandatory upgrade steps in release notes
+- Weekly tag-driven releases via GitHub Actions (images job builds+verifies multi-arch, then binaries + draft release)
+- RFCs and design discussion via `kind/design` issues, the ate-dev mailing list, and a weekly public community meeting (Thursdays 10-11 PT)
+- CNCF Slack: `#substrate-users`, `#substrate-dev`
+
+The process is mature and documented - the risk is not process chaos but *pace*: 200 commits/30d against a growing backlog.
 
 **Read:** very hot, very young, just reached 1.0, Google-led, CNCF Sandbox governance (donated at KubeCon NA 2026). Healthy contributor base and cadence. The flip side of that cadence is instability and a large open backlog (see below).
 
@@ -107,7 +171,7 @@ Method: all counts exclude `vendor/`. Implementation excludes `*_test.go` and an
 - **PostgreSQL** control-plane datastore (pgx, goose migrations, squirrel, testcontainers).
 - **OpenFGA** (Zanzibar-style) for authorization policy.
 - **SPIFFE/SPIRE-style identity** and Pod Certificate / ClusterTrustBundle plumbing.
-- **gVisor (runsc)** and **Cloud Hypervisor** microVM runtimes (checkpoint/restore).
+- **gVisor (runsc)** and the **Kata Containers + Cloud Hypervisor** microVM stack (checkpoint/restore, `userfaultfd` demand paging).
 - **Low-level Linux networking:** nftables, netlink, netns, proxy ARP/NDP.
 - **Object storage** snapshot backends: AWS S3 and GCS.
 - **OpenTelemetry** throughout; a Prometheus/Jaeger/OTel-collector observability stack.
@@ -116,6 +180,15 @@ Even the kind "hello world" install pulls **~570 MB of third-party images** (Pos
 
 **Honest assessment:** this is a specialized distributed-systems + container-runtime + Linux-networking codebase. The team has the Go/Kubernetes-controller muscle, but gVisor/microVM/Envoy/nftables depth is a new skill area. Staffing this "as-is" credibly is a multi-engineer, ongoing commitment, not a maintenance afterthought.
 
+### Is it overengineered? (addressing the concern head-on)
+
+The concern raised in the call - "overengineered, typical Google" - is partly right:
+
+- **Right:** 14 binaries, ~105k lines, its own Postgres/OpenFGA datastore, Envoy build, nftables networking, credential provider, CSI driver - plus GKE-specific plumbing and multi-cloud storage paths we would never use. That breadth is dead weight under "own as-is," and it showed up as real integration work in the OCP spike.
+- **Wrong as a dismissal:** the core problem - suspend/resume of untrusted, sandboxed workloads at 10-30x density, sub-500ms resume, zero credentials in the sandbox - has no shallow version. The security architecture is the product. Google runs it in production and kagent is betting its runtime on it.
+
+**Verdict:** not overengineered, but **broader than our use case, and we pay for the breadth anyway**. The complexity is disciplined (strong tests, mature process, heavyweight maintainers), so it will not collapse under its own weight - but "we would not have built it this way" is normal for adopting a Google-originated runtime (it was true of Knative too).
+
 ---
 
 ## 6. Technical fit on OpenShift (the crux for "can we even ship this")
@@ -123,14 +196,25 @@ Even the kind "hello world" install pulls **~570 MB of third-party images** (Pos
 **Kubernetes version** **[verified on the live clusters today]**
 - OCP 4.22 = Kubernetes **1.35.9** (CoreOS 9, cri-o 1.35).
 - OCP 5.0.1 = Kubernetes **1.36.5** (CoreOS 10, cri-o 1.36).
-- Substrate homepage floor: **1.37+**. README support policy: "latest stable + previous minor," i.e. 1.36 and 1.37. So **OCP 5.0 (1.36) is just inside the support window; OCP 4.22 (1.35) is not.**
+- Substrate homepage floor: **1.37+**. README support policy: "latest stable + previous minor," i.e. 1.36 and 1.37. So **OCP 5.0 (1.36) is just inside the support window; OCP 4.22 (1.35) is not.** Note the window moves: when 1.38 is latest, 1.36 (OCP 5.0) drops out, so OCP 5.0 support is time-limited.
+- OCP 5.1 is **not yet published** (docs.redhat.com documents 5.0 only, 5.1 returns 404 **[verified 2026-11-24]**), but a **5.1 nightly (5.1.0-0.nightly-2026-11-24-072328) = Kubernetes 1.37.2** **[verified on a live cluster, 2026-11-25]**, confirming the one-minor-per-release pattern. That nightly serves `ClusterTrustBundle` and `PodCertificateRequest` at `certificates.k8s.io/v1` **[verified]** - and since these gates GA'd and are locked on in 1.37, that is expected to hold on a stock 5.1 without any feature set change (the test cluster had TechPreviewNoUpgrade enabled, which cannot be disabled, so the no-TPNU case is inferred, not tested). **The feature-gate and version blockers are therefore cleared on OCP 5.1.**
 
-**Feature-gate blocker** **[verified from the installer; OCP-side specifics need confirmation]**
-Substrate's own kind installer enables `ClusterTrustBundle`, `ClusterTrustBundleProjection`, `PodCertificateRequest`, and `runtimeConfig: certificates.k8s.io/v1beta1`, with the comment "not enabled by default as of Kubernetes v1.36." OpenShift does not let you toggle individual upstream feature gates; you get `Default`, `TechPreviewNoUpgrade`, or `DevPreviewNoUpgrade` sets, and `TechPreviewNoUpgrade` is irreversible and blocks upgrades. On **managed ROSA/OSD this is not customer-configurable at all.** Whether OCP 5.0's TechPreview set even includes these gates is unconfirmed. **This is the most concrete blocker to running Substrate on OpenShift today.**
+**Feature-gate blocker - resolves itself on Kubernetes 1.37** **[verified against kubernetes.io feature-gate tables, 2026-11-24]**
+Substrate's own kind installer enables `ClusterTrustBundle`, `ClusterTrustBundleProjection`, `PodCertificateRequest`, and `runtimeConfig: certificates.k8s.io/v1beta1`, with the comment "not enabled by default as of Kubernetes v1.36." OpenShift does not let you toggle individual upstream feature gates; you get `Default`, `TechPreviewNoUpgrade`, or `DevPreviewNoUpgrade` sets, and `TechPreviewNoUpgrade` is irreversible and blocks upgrades. On **managed ROSA/OSD this is not customer-configurable at all.** This is the most concrete blocker to running Substrate on OpenShift **today**.
 
-**Isolation runtime mismatch.** Substrate is gVisor-first (microVM via Cloud Hypervisor). OpenShift's supported sandbox runtime is **Kata** (OpenShift sandboxed containers), which is what the Red Hat build of Agent Sandbox uses. gVisor nested in worker pods needs privileged/elevated pods, which means custom SCCs on OCP. **[verified architecture; OCP SCC specifics needs confirmation]**
+However, all three required gates graduated to **Stable (GA, locked on, cannot be disabled) in Kubernetes 1.37**, with the v1 APIs served (no more `certificates.k8s.io/v1beta1` runtime config):
 
-**Net:** running upstream Substrate unmodified on current OpenShift is blocked or heavily caveated today. Making it a supportable OCP product is itself a project (feature-gate enablement path, Kata/gVisor story, SCC hardening), which collides with the "no new features" framing.
+| Gate | Alpha | Beta (off by default) | Stable |
+|---|---|---|---|
+| `ClusterTrustBundle` | 1.27 | 1.33-1.36 | **1.37** |
+| `ClusterTrustBundleProjection` | 1.29 | 1.33-1.36 | **1.37** |
+| `PodCertificateRequest` | 1.34 | 1.35-1.36 | **1.37** |
+
+On 1.37 there is nothing to toggle: the OpenShift gate-set limitation and the ROSA/OSD restriction stop applying. **The gate blocker is therefore a timing problem - it clears on the first OCP to ship K8s 1.37 (OCP 5.1, nightly verified) - not a permanent incompatibility.** OCP 5.0 is ruled out entirely: its TechPreviewNoUpgrade set does not include these gates **[verified against the `release-5.0` feature-set table in openshift/cluster-kube-apiserver-operator, 2026-11-25]**, so no customer-configurable feature set on 5.0 serves the APIs Substrate needs.
+
+**Isolation model gap (corrected 2026-11-24).** An earlier draft framed this as "gVisor vs Kata"; that is wrong. Substrate's microVM class runs actors in a **Kata Containers guest on the Cloud Hypervisor VMM, nested inside worker pods** (`ateworker-microvm`), and its gVisor class nests `runsc` in pods the same way **[verified, docs/concepts/architecture.md]**. The real gap is **in-pod nested sandboxes vs node-level runtime**: Substrate worker pods need elevated privileges (an in-pod VMM using `userfaultfd`, host-assembled rootfs overlays served over virtio-fs, node-local sandbox asset caches), which means custom SCCs on OCP, while OpenShift's supported sandbox is **node-level** Kata (OpenShift sandboxed containers), which is what the Red Hat build of Agent Sandbox uses. This is an SCC/integration and support-boundary problem, not a fundamental incompatibility, and the shared Kata/Cloud Hypervisor lineage strengthens the complementary framing in Section 3. **[verified architecture; OCP SCC specifics still needs confirmation]**
+
+**Net:** running upstream Substrate unmodified on current OpenShift (4.22/5.0) is blocked by the version/gate floor until the first OCP on K8s 1.37, and heavily caveated (privileged in-pod sandboxes, custom SCCs) even then. Making it a supportable OCP product is itself a project (SCC hardening, a node-level Kata story or documented exception), which collides with the "no new features" framing - but "blocked today" should be read as "blocked until ~5.1," not "does not fit OpenShift."
 
 ---
 
@@ -164,8 +248,8 @@ All Apache-2.0. **[verified via GitHub API + local clones, 2026-11-23]**
 | Maturity at adoption | mature, stable APIs, CNCF graduated-track | 6 months old, v1.0, breaking changes expected |
 | Size / surface | focused autoscaler (~44k LOC) | ~114k impl LOC (Go+Py), 14 binaries, deep systems stack |
 | Skill adjacency | autoscaling, controllers (strong fit) | controllers yes; gVisor/microVM/Envoy/nftables new |
-| OCP integration | clean (runs on any OCP) | blocked today (feature gates, gVisor vs Kata) |
-| Competing RH bet? | no | yes (Red Hat build of Agent Sandbox) |
+| OCP integration | clean (runs on any OCP) | blocked today (gate floor clears on K8s 1.37 / plausibly OCP 5.1; privileged in-pod sandboxes vs node-level Kata remain) |
+| Competing RH bet? | no | partial - same problem space, different layer (Agent Sandbox = node-level isolation; overlap: warm pools today, converging roadmaps tomorrow) |
 | Governance | CNCF | CNCF Sandbox, Google-founded |
 
 The precedent supports the *model* (own upstream, ship a Red Hat build) and shows the team can do it. It does **not** imply comparable cost or risk: Substrate is materially larger and broader in scope (a multi-component data plane, not one autoscaler), much younger, and less OCP-ready, and it overlaps an existing product.
@@ -185,16 +269,16 @@ The precedent supports the *model* (own upstream, ship a Red Hat build) and show
 
 These change the answer and only they can settle them. Ordered by impact.
 
-1. **Strategy vs Red Hat build of Agent Sandbox.** We already ship Agent Sandbox (Kata) for agent isolation. Is Substrate meant to **complement** it (density/scheduling tier), **replace** it, or **compete**? What is the one-runtime story we would be executing?
-2. **What does "owning" mean, practically?** Do we fork and carry a downstream, or start contributing and work toward maintainer seats on the upstream? And what is "internal product" here: own the upstream CNCF project and ship a "Red Hat build of Agent Substrate" (the KEDA model), an internal fork, or both? The engagement model (fork vs upstream maintainership) drives cost, our influence over direction, and how fast we can land the OCP changes from Section 6.
-3. **Why us vs the autoscaler team?** What is the strategic rationale for Functions + Plugin specifically, beyond availability?
-4. **Capacity.** Owning a ~105k-LOC (implementation), ~615-issue, 14-binary project "as-is" still needs triage, release engineering, and CVE response. What headcount and skills (gVisor/microVM/Envoy/networking) come with it?
-5. **Is "no new features day 0" real?** It is stated alongside "RFEs from the OCP AI team, prioritized over frontend." What is the RFE volume/SLA expectation, and which wins when they conflict?
-6. **Plugin impact.** What happens to the console plugin commitments and the 6 months of roadmap if frontend is deprioritized "for the initial time"? How long is "initial"?
-7. **OCP target and feasibility.** Must it run on **managed** OCP (ROSA/OSD), where feature gates are not customer-configurable? What is the supported path for the required K8s features and for gVisor vs Kata on OCP?
-8. **Governance and influence.** As a CNCF Sandbox project Google founded, what maintainer standing do we get? Upstream-first, or carry a downstream?
-9. **Reversibility.** If we take it and it proves too heavy, can it move to the autoscaler team later without a crisis?
-10. **Coordination with kagent.** kagent is adopting Substrate as its runtime. Do we align with kagent-dev, and does that shape priorities?
+1. **Goal.** Why does Red Hat want Substrate at all - a seat at the table below kagent, a product customers run, or a hedge? This determines scope, staffing, and what "success" means.
+1. **Relation to Agent Sandbox.** They sit at different layers (see Section 3), so not "which one wins" but: how do they compose, who owns the two-layer story, and what if agent-sandbox's "deep hibernation" roadmap rebuilds Substrate's core feature - which direction does Red Hat consolidate?
+1. **What does "owning" mean, practically?** Our working assumption is the KEDA model: contribute upstream toward maintainer seats (become the SMEs) and ship a "Red Hat build of Agent Substrate" downstream. Confirm that assumption.
+1. **Why us vs the autoscaler team?** What is the strategic rationale for Functions + Plugin specifically, beyond availability?
+1. **Capacity.** Owning a ~105k-LOC (implementation), ~615-issue, 14-binary project "as-is" still needs triage, release engineering, and CVE response. What headcount and skills (gVisor/microVM/Envoy/networking) come with it?
+1. **What is actually expected of us on day 0?** "No new features" and "RFEs from the OCP AI team, prioritized over frontend" are contradictory as stated - an RFE is a feature. So what does the first months of ownership concretely look like: triage, releases, and CVE response only? Or landing OCP enablement (itself new work - the spike scoped it)? What is the expected RFE volume and response SLA, and what is deliberately *not* expected?
+1. **Plugin impact.** What happens to the console plugin commitments and the 6 months of roadmap if frontend is deprioritized "for the initial time"? How long is "initial"?
+1. **Governance and influence.** As a CNCF Sandbox project Google founded, what maintainer standing do we get? Is upstream-first mandatory for OCP enablement changes?
+1. **Reversibility.** If we take it and it proves too heavy, can it move to the autoscaler team later without a crisis? What happens to us?
+1. **Coordination with kagent.** kagent is adopting Substrate as its runtime. Do we align with kagent-dev, and does that shape priorities?
 
 ---
 
@@ -208,16 +292,40 @@ Non-negotiables to carry in, framed from the call notes ("organized better, not 
 - **Explicit, funded scope.** Either genuinely "maintenance as-is" with protected plugin time, or a real product mandate with the headcount to match. Not both responsibilities on one team's current capacity.
 - **A written charter** for what "ownership" includes (triage, releases, CVEs, RFEs, upstream maintainership) and what it excludes.
 
+### How many of us would it take? (analysis, judgment)
+
+**Ownership model (team's working assumption):** we own the **Red Hat build** of Agent Substrate, KEDA-style. That means three things at once: (1) contribute upstream and drive it, to become the SMEs; (2) build and maintain the downstream (the Red Hat build: OCP enablement, releases, CVEs, backports); (3) absorb internal RFEs (OCP AI team) and drive their resolution, upstream-first. The sizing in Section 10 assumes this model.
+
+For scale: upstream has ~12 active maintainers doing 200 commits/month against 628 open issues, with weekly releases. KEDA, our precedent, needs a similar number of people but runs 6x calmer (33 commits/month) - that is why we could absorb KEDA, but cannot absorb this on the side.
+
+Under the assumed ownership model (Section header) we carry **three streams at once**: driving upstream (becoming SMEs), maintaining the Red Hat build downstream, and absorbing internal RFEs.
+
+- **Minimum to be credible: 4 engineers + a PM.** Everyone blends upstream contribution (roughly a quarter of the project's merge activity is what earns maintainer seats and SME standing), downstream maintenance (tracking weekly upstream releases, backports, CVEs), and internal RFEs by priority. Functions Red Hat normally separates - QE, and sustaining/backport engineering once the product GA's - are additions for later, not day-one asks.
+- **Comfortable / real impact: 5-7 engineers.** At that size we can drive upstream direction instead of following it, ship the Red Hat build without heroics, and absorb RFEs without dropping the upstream contribution that makes us SMEs in the first place.
+- **At least one of those engineers needs real container-runtime or Linux-networking experience** (gVisor, Envoy, nftables).
+
+This is our own estimate from the data above - pressure-test it against Mike's capacity answer (Q4).
+
 ---
 
 ## 11. Evidence log, verification status, and next steps
 
 **Primary sources consulted today:** Google Open Source blog (Substrate + gVisor CNCF donation), ate.dev, `agent-substrate/substrate` repo (README, `hack/create-kind-cluster.sh`, `go.mod`, code metrics), kagent.dev "Future of kagent" blog, GitHub API (repo stats for substrate/kagent/ax/agent-sandbox), Red Hat OpenShift 5 coverage (unite.ai), and the two live clusters (`oc`).
 
+**Update 2026-11-24, additionally consulted:** `agent-substrate/substrate` `docs/concepts/architecture.md` (confirms the microVM class is a Kata Containers guest on the Cloud Hypervisor VMM, nested in worker pods; rootfs overlays host-assembled and served over virtio-fs; `userfaultfd` demand-paged snapshot restore), kubernetes.io feature-gate reference (ClusterTrustBundle / ClusterTrustBundleProjection / PodCertificateRequest all Stable and locked-on in 1.37, v1 APIs served), docs.redhat.com (only OCP 5.0 published; 5.1 absent), and `kubernetes-sigs/agent-sandbox` README (Sandbox CRD delegates isolation to node-level RuntimeClass; warm pools shipped; "deep hibernation" and memory sharing listed as desired features only; no density/oversubscription control plane).
+
+**Update 2026-11-25, additionally consulted:** GitHub search API (open-issue counts by `kind/*` and `prio/*` label), the full git history of `agent-substrate/substrate` (commit counts by author email domain, 164 unique authors), the GitHub PR/GraphQL API (merged-by distribution over the last 300 merged PRs), user profiles for affiliation checks (dberkov=Google, dims=Nvidia), `CONTRIBUTING.md` (review, testing, DCO, merge-queue, release process), `docs/project/community.md` (channels, weekly meeting), and `docs/dev/releasing.md` (release pipeline). Also: the `release-5.0` branch of `openshift/cluster-kube-apiserver-operator` (feature-set contents, for the OCP 5.0 TPNU question) and the hands-on OCP 5.1 spike (see spike log).
+
 **Verified today:** architecture and components; code metrics; dependency surface; community stats; Substrate's K8s feature-gate requirements; OCP 4.22 = 1.35.9 and OCP 5.0.1 = 1.36.5; kagent's migration to Substrate; existence of `kubernetes-sigs/agent-sandbox` and the Red Hat build of Agent Sandbox.
 
-**Needs confirmation:** that "Red Hat build of Agent Sandbox" upstream is `kubernetes-sigs/agent-sandbox`; exact OCP 5.0 TechPreview feature-gate contents and whether they cover `PodCertificateRequest`/`ClusterTrustBundle`; OCP SCC requirements for gVisor-in-pod; depth of named adopters' production use; sub-500ms vs sub-100ms resume claim (sources differ: Google says <500ms, kagent says sub-100ms).
+**Needs confirmation:** that "Red Hat build of Agent Sandbox" upstream is `kubernetes-sigs/agent-sandbox`; OCP 5.1's GA date (nightly = K8s 1.37.2, verified); that the GA'd certificate APIs are served on a stock (non-TechPreviewNoUpgrade) OCP 5.1; OCP SCC requirements for the in-pod gVisor / Kata-on-Cloud-Hypervisor worker pods; depth of named adopters' production use; sub-500ms vs sub-100ms resume claim (sources differ: Google says <500ms, kagent says sub-100ms). **Resolved 2026-11-25:** OCP 5.0's TechPreviewNoUpgrade set does *not* include `ClusterTrustBundle` / `ClusterTrustBundleProjection` / `PodCertificateRequest` (checked against the `release-5.0` feature-set table in openshift/cluster-kube-apiserver-operator's vendored openshift/api `features.md`; the gates appear in no feature set on 5.0) - so OCP 5.0 cannot run Substrate under any customer-configurable feature set, and **OCP 5.1 is the floor**.
 
-**Spike status (hands-on hello-world):** not yet run. Blockers found: the Substrate kind installer manages a container named `kind-registry` and would `docker rm -f` your existing one (port 5000, serving the `tekton` cluster); port 5001 (its default) is also in use. An isolated-registry variant is straightforward but not yet done. An OCP deploy of the counter demo is expected to hit the feature-gate blocker in Section 6. **Recommendation:** run the isolated kind spike to ground the "what owning it feels like" claim, and attempt an OCP 5.0 deploy specifically to document exactly where it fails (that failure is itself evidence for the decision).
+**Spike status: executed 2026-11-25 on an OCP 5.1 nightly (5.1.0-0.nightly-2026-11-24-072328, K8s 1.37.2), upstream v1.0.1, gvisor sandbox class only.** **The full control plane runs on OCP 5.1** - api-server, controller, idp-server, atenet (Envoy), atelet on all nodes, postgres, rustfs, and the Pod Certificate machinery, which needed zero changes (the Section 6 gate blocker is confirmed gone on 1.37).
 
-**Open follow-ups if we proceed:** confirm the Agent Sandbox upstream; test Substrate on OCP 5.0 (1.36) with a feature-gate path; evaluate whether func-console could be the console FE for Substrate/kagent (separate investigation, noted but not assessed here).
+Every failure encountered was admission-control / SELinux / sysctl / registry plumbing with a known workaround - the "integration problem, not incompatibility" framing of Section 6 - plus one open issue inside the gVisor sandbox itself (likely upstream, not root-caused). Nothing fundamental blocks Substrate on OCP 5.1, but a supportable product needs: a curated SCC, an SELinux policy module, the port sysctl in worker pod generation, an image-pull credential story, and an install path that labels namespaces and binds SCCs as it goes.
+
+- Challenges and fixes, short form: [openshift-challenges.md](openshift-challenges.md)
+- Step-by-step reproduction on any OCP 5.1+ cluster: [openshift-counter-demo-runbook.md](openshift-counter-demo-runbook.md)
+- Cluster-local manifest patches: the clone at `~/Projects/substrate` (searchable via `OCP spike (2026-11-25)` comments)
+
+**Open follow-ups if we proceed:** confirm the Agent Sandbox upstream; root-cause the gVisor sandbox write-then-ENOENT issue (spike stopping point, see above) and the NET_BIND_SERVICE/userns low-port issue; complete the counter tutorial end-to-end (actor create, suspend/resume timing); evaluate whether func-console could be the console FE for Substrate/kagent (separate investigation, noted but not assessed here).
